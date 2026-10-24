@@ -1,6 +1,6 @@
 /**
  * Cloudflare Worker Handler for AI Models (Gemini 2.0 Flash + DeepSeek R1)
- * Supports CORS, streaming, error handling (valid JSON output), and Notebook context.
+ * Supports CORS, Server-Sent Events (SSE) streaming, error handling (valid JSON output), and Notebook context.
  */
 
 export default {
@@ -36,7 +36,6 @@ export default {
       const googleApiKey = env.GOOGLE_API_KEY;
       const deepseekApiKey = env.DEEPSEEK_API_KEY;
 
-      // Auto-switch: Short simple queries (e.g. "2+2") -> Gemini 2.0 Flash (<200ms TTFT)
       const isSimpleQuery = query.trim().length <= 50 && !forceReasoning;
       const useGemini = isSimpleQuery || !deepseekApiKey;
 
@@ -56,16 +55,15 @@ export default {
         );
       }
 
-      // Build context including PWA AI Notebook
       let fullPrompt = query;
       if (notebookContent && notebookContent.trim()) {
         fullPrompt = `=== ИИ ТЕТРАДЬ (КОНТЕКСТ ПРИЛОЖЕНИЯ) ===\n${notebookContent.trim()}\n=======================================\n\nЗапрос пользователя:\n${query}`;
       }
 
       if (useGemini) {
-        // Gemini 2.0 Flash API Call
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${googleApiKey}`;
-        const response = await fetch(geminiUrl, {
+        // Stream Gemini 2.0 Flash via SSE
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${googleApiKey}`;
+        const upstreamRes = await fetch(geminiUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -73,17 +71,24 @@ export default {
           }),
         });
 
-        const data = await response.json();
-        if (!response.ok) {
-          return jsonResponse({ error: data.error?.message || "Gemini API error" }, response.status, corsHeaders);
+        if (!upstreamRes.ok) {
+          const errData = await upstreamRes.json().catch(() => ({}));
+          return jsonResponse({ error: errData.error?.message || `Gemini API error ${upstreamRes.status}` }, upstreamRes.status, corsHeaders);
         }
 
-        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        return jsonResponse({ model: "gemini-2.0-flash", reply: replyText }, 200, corsHeaders);
+        return new Response(upstreamRes.body, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          },
+        });
       } else {
-        // DeepSeek-R1 API Call with Reasoning stream tags <think>
+        // Stream DeepSeek-R1 via SSE
         const deepseekUrl = "https://api.deepseek.com/chat/completions";
-        const response = await fetch(deepseekUrl, {
+        const upstreamRes = await fetch(deepseekUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -92,20 +97,24 @@ export default {
           body: JSON.stringify({
             model: "deepseek-reasoner",
             messages: [{ role: "user", content: fullPrompt }],
-            stream: false,
+            stream: true,
           }),
         });
 
-        const data = await response.json();
-        if (!response.ok) {
-          return jsonResponse({ error: data.error?.message || "DeepSeek API error" }, response.status, corsHeaders);
+        if (!upstreamRes.ok) {
+          const errData = await upstreamRes.json().catch(() => ({}));
+          return jsonResponse({ error: errData.error?.message || `DeepSeek API error ${upstreamRes.status}` }, upstreamRes.status, corsHeaders);
         }
 
-        const reasoning = data.choices?.[0]?.message?.reasoning_content || "";
-        const content = data.choices?.[0]?.message?.content || "";
-        const combinedReply = reasoning ? `<think>${reasoning}</think>${content}` : content;
-
-        return jsonResponse({ model: "deepseek-r1", reply: combinedReply }, 200, corsHeaders);
+        return new Response(upstreamRes.body, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          },
+        });
       }
     } catch (err) {
       return jsonResponse({ error: `Internal Cloudflare Worker Error: ${err.message}` }, 500, corsHeaders);

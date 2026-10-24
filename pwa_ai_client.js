@@ -1,6 +1,6 @@
 /**
  * Safe PWA Frontend Client for Cloudflare Worker AI Backend.
- * Safely parses JSON responses and handles thinking stream (<think>...</think>).
+ * Handles SSE streaming, prevents Unexpected end of JSON input, and parses reasoning process in real time.
  */
 
 export async function askAI({ workerUrl, query, notebookContent = "", forceReasoning = false, onThinking, onResponse }) {
@@ -13,38 +13,76 @@ export async function askAI({ workerUrl, query, notebookContent = "", forceReaso
 
     const contentType = res.headers.get("content-type") || "";
 
-    // Prevent 'Unexpected end of JSON input' error when server sends non-JSON or empty body
-    if (!contentType.includes("application/json")) {
-      const rawText = await res.text();
-      throw new Error(`Server returned non-JSON response (${res.status}): ${rawText.slice(0, 100)}`);
-    }
-
-    const data = await res.json();
-
-    if (!res.ok || data.error) {
-      throw new Error(data.error || `HTTP error ${res.status}`);
-    }
-
-    const reply = data.reply || "";
-
-    // Extract thinking process (<think>...</think>) if present
-    if (reply.includes("<think>")) {
-      const thinkStart = reply.indexOf("<think>") + 7;
-      const thinkEnd = reply.indexOf("</think>");
-
-      if (thinkEnd !== -1) {
-        const thinkingProcess = reply.substring(thinkStart, thinkEnd).trim();
-        const finalAnswer = reply.substring(thinkEnd + 8).trim();
-
-        if (onThinking) onThinking(thinkingProcess);
-        if (onResponse) onResponse(finalAnswer);
-
-        return { thinking: thinkingProcess, response: finalAnswer, model: data.model };
+    // If server returned non-200 JSON error object, parse safely
+    if (contentType.includes("application/json")) {
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      if (data.reply) {
+        if (onResponse) onResponse(data.reply);
+        return { response: data.reply };
       }
     }
 
-    if (onResponse) onResponse(reply);
-    return { response: reply, model: data.model };
+    if (!res.ok) {
+      const rawText = await res.text();
+      throw new Error(`HTTP ${res.status}: ${rawText.slice(0, 100)}`);
+    }
+
+    // Read SSE ReadableStream line by line
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let fullResponse = "";
+    let fullThinking = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(":")) continue;
+
+        if (trimmed.startsWith("data:")) {
+          const dataStr = trimmed.replace(/^data:\s*/, "");
+          if (dataStr === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(dataStr);
+
+            // Gemini SSE structure
+            const geminiText = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (geminiText) {
+              fullResponse += geminiText;
+              if (onResponse) onResponse(fullResponse);
+            }
+
+            // DeepSeek SSE structure
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta) {
+              if (delta.reasoning_content) {
+                fullThinking += delta.reasoning_content;
+                if (onThinking) onThinking(fullThinking);
+              }
+              if (delta.content) {
+                fullResponse += delta.content;
+                if (onResponse) onResponse(fullResponse);
+              }
+            }
+          } catch (e) {
+            // Ignore partial JSON chunks until full line arrives
+          }
+        }
+      }
+    }
+
+    return { thinking: fullThinking, response: fullResponse };
   } catch (err) {
     console.error("AI PWA Request Error:", err);
     throw err;
