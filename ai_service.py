@@ -1,7 +1,9 @@
 """
-AI Service with streaming thinking parser and Notebook context integration.
+AI Service with streaming thinking parser, API key validation, JSON response handling, and Notebook context integration.
 """
 
+import os
+import json
 from typing import Generator, Dict, Any, Optional, Tuple, List
 from models_config import DEFAULT_MODEL_PROFILES, ROUTING_CONFIG
 
@@ -77,9 +79,32 @@ def build_prompt_with_notebook(user_query: str, notebook_content: Optional[str] 
     )
 
 
+def validate_api_keys(api_keys: Optional[Dict[str, str]] = None) -> Dict[str, bool]:
+    """
+    Validates presence of API keys in environment or configuration.
+    """
+    keys = api_keys or {}
+    google_key = keys.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    deepseek_key = keys.get("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+
+    return {
+        "google": bool(google_key and google_key.strip()),
+        "deepseek": bool(deepseek_key and deepseek_key.strip()),
+    }
+
+
+def format_json_response(data: Dict[str, Any], status_code: int = 200) -> Tuple[str, int, Dict[str, str]]:
+    """
+    Formats response data as valid JSON string with headers, preventing unexpected empty/non-JSON responses.
+    """
+    body = json.dumps(data, ensure_ascii=False)
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    return body, status_code, headers
+
+
 class AIService:
     """
-    Core AI Service handling model routing, notebook context inclusion, and stream parsing.
+    Core AI Service handling model routing, notebook context inclusion, API key checks, and stream parsing.
     """
 
     def __init__(self, profiles: Optional[Dict[str, Dict[str, Any]]] = None, routing: Optional[Dict[str, Any]] = None):
@@ -104,21 +129,31 @@ class AIService:
         user_query: str,
         notebook_content: Optional[str] = None,
         force_reasoning: bool = False,
+        api_keys: Optional[Dict[str, str]] = None,
         mock_stream_chunks: Optional[List[str]] = None,
     ) -> Generator[Tuple[str, str], None, None]:
         """
         Generates response stream yielded as (type, text) chunks.
-        Type can be 'thinking' or 'response'.
+        Type can be 'thinking', 'response', or 'error'.
         """
-        prompt = build_prompt_with_notebook(user_query, notebook_content)
         profile = self.select_model_profile(user_query, force_reasoning)
+        provider = profile.get("provider", "google")
+        validations = validate_api_keys(api_keys)
+
+        if not validations.get(provider, False):
+            err_msg = json.dumps({
+                "error": f"Missing or invalid API key for provider '{provider}'. Please set {provider.upper()}_API_KEY."
+            }, ensure_ascii=False)
+            yield ("error", err_msg)
+            return
+
+        prompt = build_prompt_with_notebook(user_query, notebook_content)
 
         parser = ThinkingStreamParser(
             think_open_tag=profile.get("think_tag_open", "<think>"),
             think_close_tag=profile.get("think_tag_close", "</think>"),
         )
 
-        # Simulated streaming chunks or API integration point
         chunks = mock_stream_chunks or [f"Response using model {profile['model_id']} for prompt: {prompt}"]
 
         for chunk in chunks:
