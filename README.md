@@ -1,22 +1,41 @@
-# AI Integration & Optimization Guide
+# AI Integration & Optimization Guide (Cloudflare Worker & PWA)
 
 ## Solution Overview / Решение проблем
 
-В данном решении устранены 3 главные проблемы:
+В данном решении устранены все проблемы:
 
-1. **Долгая задержка ответа на простые вопросы (например, 2+2)**:
-   - Использование **Gemini 2.0 Flash** обеспечивает сверхнизкую задержку (TTFT < 200 мс) и практически мгновенный ответ на легкие запросы.
+1. **Долгая задержка ответа на простые вопросы (2+2)**:
+   - Внедрена маршрутизация на **Gemini 2.0 Flash** (<200 мс TTFT).
 
 2. **Отсутствие процесса размышления (Thinking / Reasoning Stream)**:
-   - Интеграция моделей **DeepSeek-R1** и **Gemini 2.0 Flash Thinking**.
-   - Реализован класс `ThinkingStreamParser` в `ai_service.py`, который разделяет поток токенов мыслей (`<think>...</think>`) и итоговый ответ для передачи на UI в реальном времени ("ИИ думает...").
+   - Внедрен **DeepSeek-R1** с передачей блоков `<think>...</think>`. В PWA клиенте `pwa_ai_client.js` этот блок парсится и передается в callback `onThinking` для отрисовки "ИИ думает...".
 
 3. **Интеграция с ИИ Тетрадью (Notebook Context Integration)**:
-   - Модуль `AIService` поддерживает подмешивание содержимого тетради в контекстный запрос (`build_prompt_with_notebook`).
-   - Благодаря контекстному окну в 1M+ токенов у Gemini 2.0 Flash, вся тетрадь и заметки пользователя передаются в модель без потери важных деталей.
+   - Поле `notebookContent` передается из PWA в Cloudflare Worker и подмешивается в контекст запроса.
 
-## Модули
+4. **Ошибка `Failed to execute 'json' on 'Response': Unexpected end of JSON input`**:
+   - В `cloudflare_worker_ai.js` функция `jsonResponse` гарантирует заголовок `Content-Type: application/json` и завалидированный JSON ответ.
+   - В `pwa_ai_client.js` перед вызовом `.json()` проверяется `content-type`, что предотвращает краш PWA.
 
-- `models_config.py`: Конфигурация профилей моделей и маршрутизации.
-- `ai_service.py`: Потоковый парсер мыслей (`ThinkingStreamParser`) и сервис генерации с учетом контекста тетради (`AIService`).
-- `test_ai_service.py`: Юнит-тесты для проверки парсинга мыслей, маршрутизации и интеграции тетради.
+---
+
+## Инструкция по настройке Cloudflare Worker
+
+1. Скопируйте файл `cloudflare_worker_ai.js` в ваш Cloudflare Worker.
+2. Задайте секретные API ключи в Cloudflare через CLI `wrangler` или панель Cloudflare Dashboard:
+   ```bash
+   wrangler secret put GOOGLE_API_KEY
+   wrangler secret put DEEPSEEK_API_KEY
+   ```
+3. Подключите клиент `pwa_ai_client.js` в вашем PWA веб-приложении:
+   ```javascript
+   import { askAI } from './pwa_ai_client.js';
+
+   await askAI({
+     workerUrl: 'https://your-worker.workers.dev',
+     query: '2+2',
+     notebookContent: 'Моя заметка в тетради...',
+     onThinking: (thoughts) => { console.log('ИИ думает:', thoughts); },
+     onResponse: (answer) => { console.log('Ответ:', answer); }
+   });
+   ```
