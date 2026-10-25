@@ -41,7 +41,7 @@ export default {
 
       if (useGemini && !googleApiKey) {
         return jsonResponse(
-          { error: "GOOGLE_API_KEY is missing on Cloudflare Worker. Add it with `wrangler secret put GOOGLE_API_KEY`." },
+          { error: "GOOGLE_API_KEY is missing on Cloudflare Worker. Please run `npx wrangler secret put GOOGLE_API_KEY`." },
           500,
           corsHeaders
         );
@@ -49,7 +49,7 @@ export default {
 
       if (!useGemini && !deepseekApiKey) {
         return jsonResponse(
-          { error: "DEEPSEEK_API_KEY is missing on Cloudflare Worker. Add it with `wrangler secret put DEEPSEEK_API_KEY`." },
+          { error: "DEEPSEEK_API_KEY is missing on Cloudflare Worker. Please run `npx wrangler secret put DEEPSEEK_API_KEY`." },
           500,
           corsHeaders
         );

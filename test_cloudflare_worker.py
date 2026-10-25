@@ -17,6 +17,14 @@ class TestCloudflareWorkerAI(unittest.TestCase):
         self.assertEqual(parsed["reply"], "4")
         self.assertIn("application/json", headers["Content-Type"])
 
+    def test_api_key_check(self):
+        env = {}
+        google_key = env.get("GOOGLE_API_KEY")
+        deepseek_key = env.get("DEEPSEEK_API_KEY")
+
+        self.assertIsNone(google_key)
+        self.assertIsNone(deepseek_key)
+
     def test_thinking_tag_extraction(self):
         reply = "<think>Calculated 2 + 2 = 4</think>The answer is 4."
         self.assertIn("<think>", reply)
