@@ -3,6 +3,21 @@
  * Handles SSE streaming, prevents Unexpected end of JSON input, and parses reasoning process in real time.
  */
 
+function explainProviderError(message) {
+  const retry = message.match(/retry in\s+([\d.]+)s/i);
+  const seconds = retry ? Math.ceil(Number(retry[1])) : 60;
+  if (/quota exceeded|resource_exhausted|free_tier_requests|requests per minute limit exceeded/i.test(message)) {
+    return `Исчерпан минутный лимит Gemini. Подожди примерно ${seconds} сек. и отправь вопрос снова. Ключ работает; перезапуск сервера не поможет.`;
+  }
+  if (/high demand|temporarily overloaded|service_unavailable/i.test(message)) {
+    return "Gemini сейчас перегружен. Подожди немного и попробуй ещё раз.";
+  }
+  if (/insufficient balance/i.test(message)) {
+    return "У DeepSeek закончился баланс. Попробуй позже: приложение переключится на Gemini.";
+  }
+  return message;
+}
+
 export async function askAI({ workerUrl = "/api/chat", query, notebookContent = "", forceReasoning = false, onThinking, onResponse }) {
   try {
     const res = await fetch(workerUrl, {
@@ -23,7 +38,7 @@ export async function askAI({ workerUrl = "/api/chat", query, notebookContent = 
         throw new Error(`Cloudflare вернул некорректный JSON (HTTP ${res.status}). Проверь Pages Function /api/chat.`);
       }
       if (data.error) {
-        throw new Error(data.error);
+        throw new Error(explainProviderError(String(data.error)));
       }
       if (data.reply) {
         if (onResponse) onResponse(data.reply);
