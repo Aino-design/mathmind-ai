@@ -61,7 +61,7 @@ export default {
       // USE_DEEPSEEK=true setting, use the configured Gemini key for every query.
       const useGemini = isSimpleQuery || !deepseekApiKey || env.USE_DEEPSEEK !== "true";
 
-      if (useGemini && !googleApiKey) {
+      if (useGemini && !googleApiKey && !env.GROQ_API_KEY) {
         return jsonResponse(
           { error: "GEMINI_API_KEY is missing from the Cloudflare Pages project secrets." },
           500,
@@ -82,13 +82,39 @@ export default {
         fullPrompt = `=== ИИ ТЕТРАДЬ (КОНТЕКСТ ПРИЛОЖЕНИЯ) ===\n${notebookContent.trim()}\n=======================================\n\nЗапрос пользователя:\n${query}`;
       }
 
+      // Optional Groq Qwen provider. The key remains a Cloudflare secret.
+      const groqResult = env.GROQ_API_KEY
+        ? await requestGroq(env.GROQ_API_KEY, fullPrompt, forceReasoning, env.GROQ_MODEL)
+        : null;
+      if (groqResult?.response) {
+        if (legacyJsonClient) return await legacyJsonResponse(groqResult.response, corsHeaders);
+        return new Response(groqResult.response.body, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          },
+        });
+      }
+
+      if (useGemini && !googleApiKey) {
+        return jsonResponse({
+          error: `Groq не ответил (${groqResult?.error || "ошибка"}), и в Cloudflare не задан GEMINI_API_KEY для резерва.`,
+        }, 502, corsHeaders);
+      }
+
       if (useGemini) {
         // Retry temporary overloads, then step down to stable Flash models.
         const upstreamRes = await requestGemini(googleApiKey, fullPrompt, forceReasoning ? "medium" : "low");
 
         if (!upstreamRes.ok) {
           const errData = await upstreamRes.json().catch(() => ({}));
-          return jsonResponse({ error: errData.error?.message || `Gemini API error ${upstreamRes.status}` }, upstreamRes.status, corsHeaders);
+          const geminiError = errData.error?.message || `Gemini API error ${upstreamRes.status}`;
+          return jsonResponse({
+            error: `${groqResult?.error ? `Groq не ответил (${groqResult.error}); ` : ""}${geminiError}`,
+          }, upstreamRes.status, corsHeaders);
         }
 
         if (legacyJsonClient) return await legacyJsonResponse(upstreamRes, corsHeaders);
@@ -215,6 +241,43 @@ async function requestGemini(apiKey, prompt, thinkingLevel) {
 
   if (lastResponse) return lastResponse;
   return jsonResponse({ error: `Gemini временно недоступен: ${lastError?.message || "ошибка сети"}` }, 503);
+}
+
+async function requestGroq(apiKey, prompt, forceReasoning, configuredModel) {
+  try {
+    const response = await fetchBeforeHeaders("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: configuredModel || "qwen/qwen3.8-27b",
+        messages: [
+          {
+            role: "system",
+            content: [
+              "Ты MathMind, дружелюбный репетитор по математике. Отвечай на русском, если пользователь пишет по-русски.",
+              "На простой вопрос отвечай кратко и сразу; сложную тему объясняй понятно, по шагам и с примерами.",
+              "Форматируй ответ Markdown: используй абзацы, списки и формулы, когда это помогает.",
+              "Если дан контекст тетради, опирайся на него и не выдумывай нечитаемые записи.",
+              forceReasoning ? "Тщательно проверь решение и объясни понятные шаги, не раскрывая скрытые внутренние рассуждения." : "",
+            ].filter(Boolean).join(" "),
+          },
+          { role: "user", content: prompt },
+        ],
+        stream: true,
+        max_completion_tokens: 2048,
+        ...(forceReasoning ? { reasoning_effort: "medium", reasoning_format: "hidden" } : {}),
+      }),
+    });
+
+    if (response.ok) return { response };
+    const details = await response.text().catch(() => "");
+    return { error: details.slice(0, 300) || `HTTP ${response.status}` };
+  } catch (error) {
+    return { error: error.message };
+  }
 }
 
 async function fetchBeforeHeaders(url, options, timeoutMs = 12000) {

@@ -7,7 +7,8 @@
 ## 🚀 Решенные проблемы
 
 1. **Ответы на вопросы**:
-   - По умолчанию все запросы идут в Gemini; при временной перегрузке Worker повторяет запрос и переключается между Gemini Flash 3.8, 3.7 и 3.6.
+   - Если в Cloudflare добавлен `GROQ_API_KEY`, запрос сначала отправляется в Groq Qwen с потоковой выдачей.
+   - При отказе Groq запрос переходит к текущей схеме Gemini (или DeepSeek, если его вручную включили).
 2. **Процесс размышления (Thinking Stream)**:
    - DeepSeek-R1 можно включить отдельно (`USE_DEEPSEEK=true`) при наличии баланса. Если DeepSeek откажет, Worker попробует Gemini.
 3. **Интеграция с ИИ Тетрадью**:
@@ -25,9 +26,11 @@
 2. В консоли Cloudflare задайте секреты с ключами API:
    ```bash
    npx wrangler secret put GEMINI_API_KEY
+   npx wrangler secret put GROQ_API_KEY
    npx wrangler secret put DEEPSEEK_API_KEY
    ```
-   * **`GEMINI_API_KEY`**: ключ из [Google AI Studio](https://aistudio.google.com/); он используется всегда, если DeepSeek не включён.
+   * **`GEMINI_API_KEY`**: ключ из [Google AI Studio](https://aistudio.google.com/); используется как резерв, если Groq не настроен или недоступен.
+   * **`GROQ_API_KEY`**: необязательный ключ из [Groq Console](https://console.groq.com/keys). Если он добавлен, вопросы и контекст тетради отправляются в Groq Qwen.
    * **`DEEPSEEK_API_KEY`**: ключ из [DeepSeek Platform](https://platform.deepseek.com/), необязателен.
    * **`USE_DEEPSEEK=true`**: необязательная переменная для включения DeepSeek. Если её не задавать, запросы идут только через Gemini.
 
@@ -51,4 +54,4 @@
 4. Запустите новый deployment и дождитесь статуса Success.
 5. Проверьте https://ВАШ-САЙТ.pages.dev/api/chat в браузере: GET должен показать JSON о работе Worker. Затем проверьте чат в приложении.
 
-Функция использует Gemini 3.8 Flash с повторными попытками и резервом на Gemini 3.7/3.6 Flash при временной перегрузке. DeepSeek выключен по умолчанию, чтобы запросы не зависели от его платного баланса. Значение API-ключа хранится только в Cloudflare Secret и не должно попадать в GitHub.
+Для Pages добавьте production secrets `GROQ_API_KEY` и `GEMINI_API_KEY` через настройки проекта или `npx wrangler pages secret put ИМЯ --project-name mathmind-ai`, затем создайте новый deployment. Groq Qwen используется первым, Gemini Flash 3.8/3.7/3.6 — резервом. Лимиты провайдеров не складываются в гарантированную общую квоту: резерв помогает при отказе основного сервиса, но у него тоже есть собственные ограничения. DeepSeek выключен по умолчанию, чтобы запросы не зависели от его платного баланса. Ключи хранятся только в Cloudflare Secrets и не должны попадать в GitHub.
