@@ -1,5 +1,5 @@
 /**
- * Cloudflare Worker Handler for AI Models (Gemini 2.0 Flash + DeepSeek R1)
+ * Cloudflare Worker Handler for AI Models (Gemini 3.8 Flash + DeepSeek R1)
  * Supports CORS, Server-Sent Events (SSE) streaming, error handling (valid JSON output), and Notebook context.
  */
 
@@ -39,7 +39,7 @@ export default {
         return jsonResponse({ error: "Field 'query' is required." }, 400, corsHeaders);
       }
 
-      const googleApiKey = env.GOOGLE_API_KEY;
+      const googleApiKey = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
       const deepseekApiKey = env.DEEPSEEK_API_KEY;
 
       const isSimpleQuery = query.trim().length <= 50 && !forceReasoning;
@@ -47,7 +47,7 @@ export default {
 
       if (useGemini && !googleApiKey) {
         return jsonResponse(
-          { error: "GOOGLE_API_KEY missing on Cloudflare Worker. Set it with `npx wrangler secret put GOOGLE_API_KEY`." },
+          { error: "GEMINI_API_KEY is missing from the Cloudflare Pages project secrets." },
           500,
           corsHeaders
         );
@@ -67,13 +67,14 @@ export default {
       }
 
       if (useGemini) {
-        // Stream Gemini 2.0 Flash via SSE
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${googleApiKey}`;
+        // Stream the current Gemini Flash model via SSE.
+        const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse";
         const upstreamRes = await fetch(geminiUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-goog-api-key": googleApiKey },
           body: JSON.stringify({
             contents: [{ parts: [{ text: fullPrompt }] }],
+            generationConfig: { thinkingConfig: { thinkingLevel: forceReasoning ? "medium" : "low" } },
           }),
         });
 

@@ -2,9 +2,9 @@
 Configuration for AI Models and Routing.
 
 Provides best-in-class model selections for:
-1. Fast response / low Time-To-First-Token (TTFT) for simple queries (e.g., 2+2) -> Gemini 2.0 Flash
-2. Deep reasoning with visible thinking process stream -> DeepSeek R1 / Gemini 2.0 Flash Thinking
-3. Large context window support for reading user notebook / AI notebook contents -> Gemini 2.0 Flash (1M-2M context window)
+1. Fast response for simple queries (e.g., 2+2) -> Gemini 3.8 Flash
+2. Deep reasoning with visible thinking process stream -> DeepSeek R1
+3. Notebook context -> Gemini 3.8 Flash
 """
 
 from typing import Dict, Any
@@ -12,8 +12,8 @@ from typing import Dict, Any
 DEFAULT_MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
     "fast_general": {
         "provider": "google",
-        "model_id": "gemini-2.0-flash",
-        "description": "Ultra-fast response time (<200ms TTFT) for simple queries and general conversation.",
+        "model_id": "gemini-3.8-flash",
+        "description": "Fast multimodal responses for simple queries and general conversation.",
         "max_context_tokens": 1000000,
         "supports_streaming": True,
         "supports_thinking_stream": False,
@@ -30,11 +30,11 @@ DEFAULT_MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
     },
     "reasoning_fast": {
         "provider": "google",
-        "model_id": "gemini-2.0-flash-thinking-exp",
-        "description": "Fast multimodal reasoning model with real-time thought stream.",
+        "model_id": "gemini-3.8-flash",
+        "description": "Multimodal responses with low-latency reasoning.",
         "max_context_tokens": 1000000,
         "supports_streaming": True,
-        "supports_thinking_stream": True,
+        "supports_thinking_stream": False,
     },
 }
 

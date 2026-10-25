@@ -43,7 +43,7 @@ class TestAIService(unittest.TestCase):
         service = AIService()
 
         fast_profile = service.select_model_profile("2+2")
-        self.assertEqual(fast_profile["model_id"], "gemini-2.0-flash")
+        self.assertEqual(fast_profile["model_id"], "gemini-3.8-flash")
 
         reasoning_profile = service.select_model_profile("2+2", force_reasoning=True)
         self.assertEqual(reasoning_profile["model_id"], "deepseek-r1")

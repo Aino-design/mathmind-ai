@@ -84,7 +84,12 @@ def validate_api_keys(api_keys: Optional[Dict[str, str]] = None) -> Dict[str, bo
     Validates presence of API keys in environment or configuration.
     """
     keys = api_keys or {}
-    google_key = keys.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    google_key = (
+        keys.get("GEMINI_API_KEY")
+        or keys.get("GOOGLE_API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    )
     deepseek_key = keys.get("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
 
     return {

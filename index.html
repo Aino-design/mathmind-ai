@@ -85,7 +85,7 @@
   <div class="chat-modal-overlay" id="chatModal">
     <div class="chat-modal">
       <div class="chat-modal-header">
-        <span>Чат с ИИ (Gemini 2.0 / DeepSeek-R1)</span>
+      <span>Чат с ИИ (Gemini Flash / DeepSeek-R1)</span>
         <button class="chat-modal-close" id="closeChatBtn">&times;</button>
       </div>
 
@@ -178,7 +178,7 @@
 
       try {
         await askAI({
-          workerUrl: '/api/chat', // Cloudflare Worker endpoint
+          workerUrl: '/api/chat', // Cloudflare Pages Function endpoint
           query,
           notebookContent,
           onThinking: (thoughts) => {

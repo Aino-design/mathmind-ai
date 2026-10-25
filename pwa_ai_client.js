@@ -13,9 +13,15 @@ export async function askAI({ workerUrl = "/api/chat", query, notebookContent = 
 
     const contentType = res.headers.get("content-type") || "";
 
-    // If server returned non-200 JSON error object, parse safely
+    // Parse JSON errors safely; empty/error HTML from Pages must not become a JSON parse exception.
     if (contentType.includes("application/json")) {
-      const data = await res.json();
+      const raw = await res.text();
+      let data;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(`Cloudflare вернул некорректный JSON (HTTP ${res.status}). Проверь Pages Function /api/chat.`);
+      }
       if (data.error) {
         throw new Error(data.error);
       }
@@ -28,6 +34,11 @@ export async function askAI({ workerUrl = "/api/chat", query, notebookContent = 
     if (!res.ok) {
       const rawText = await res.text();
       throw new Error(`HTTP ${res.status}: ${rawText.slice(0, 100) || "Empty server response"}`);
+    }
+
+    if (!contentType.includes("text/event-stream")) {
+      const rawText = await res.text();
+      throw new Error(`Для /api/chat ожидался потоковый ответ, но пришёл ${contentType || "пустой ответ"}: ${rawText.slice(0, 80)}`);
     }
 
     if (!res.body) {
@@ -86,6 +97,9 @@ export async function askAI({ workerUrl = "/api/chat", query, notebookContent = 
       }
     }
 
+    if (!fullResponse) {
+      throw new Error("ИИ вернул пустой поток. Проверь модель и секрет GEMINI_API_KEY в Cloudflare.");
+    }
     return { thinking: fullThinking, response: fullResponse };
   } catch (err) {
     console.error("AI PWA Request Error:", err);
