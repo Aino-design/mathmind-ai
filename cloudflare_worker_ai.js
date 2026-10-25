@@ -50,7 +50,9 @@ export default {
       const deepseekApiKey = env.DEEPSEEK_API_KEY;
 
       const isSimpleQuery = query.trim().length <= 50 && !forceReasoning;
-      const useGemini = isSimpleQuery || !deepseekApiKey;
+      // Keep DeepSeek opt-in: it requires a funded account. Without the explicit
+      // USE_DEEPSEEK=true setting, use the configured Gemini key for every query.
+      const useGemini = isSimpleQuery || !deepseekApiKey || env.USE_DEEPSEEK !== "true";
 
       if (useGemini && !googleApiKey) {
         return jsonResponse(
@@ -74,16 +76,8 @@ export default {
       }
 
       if (useGemini) {
-        // Stream the current Gemini Flash model via SSE.
-        const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse";
-        const upstreamRes = await fetch(geminiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": googleApiKey },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: fullPrompt }] }],
-            generationConfig: { thinkingConfig: { thinkingLevel: forceReasoning ? "medium" : "low" } },
-          }),
-        });
+        // Retry temporary overloads, then step down to stable Flash models.
+        const upstreamRes = await requestGemini(googleApiKey, fullPrompt, forceReasoning ? "medium" : "low");
 
         if (!upstreamRes.ok) {
           const errData = await upstreamRes.json().catch(() => ({}));
@@ -124,15 +118,7 @@ export default {
           // DeepSeek can reject requests when its prepaid balance is empty.
           // Fall back to the already-configured Gemini key so the chat remains usable.
           if (googleApiKey) {
-            const fallbackUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse";
-            const fallbackRes = await fetch(fallbackUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "x-goog-api-key": googleApiKey },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: fullPrompt }] }],
-                generationConfig: { thinkingConfig: { thinkingLevel: "medium" } },
-              }),
-            });
+            const fallbackRes = await requestGemini(googleApiKey, fullPrompt, "medium");
 
             if (fallbackRes.ok) {
               if (legacyJsonClient) return await legacyJsonResponse(fallbackRes, corsHeaders);
@@ -184,6 +170,44 @@ function jsonResponse(obj, status = 200, headers = {}) {
       "Content-Type": "application/json; charset=utf-8",
     },
   });
+}
+
+async function requestGemini(apiKey, prompt, thinkingLevel) {
+  const models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];
+  let lastResponse;
+  let lastError;
+
+  for (const [modelIndex, model] of models.entries()) {
+    const attempts = modelIndex === 0 ? 3 : 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        lastResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { thinkingConfig: { thinkingLevel } },
+          }),
+        });
+
+        if (lastResponse.ok) return lastResponse;
+        const canRetry = [429, 500, 502, 503, 504].includes(lastResponse.status);
+        if (canRetry && attempt + 1 < attempts) {
+          await new Promise((resolve) => setTimeout(resolve, 800 * (2 ** attempt)));
+          continue;
+        }
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt + 1 < attempts) {
+          await new Promise((resolve) => setTimeout(resolve, 800 * (2 ** attempt)));
+        }
+      }
+    }
+  }
+
+  if (lastResponse) return lastResponse;
+  return jsonResponse({ error: `Gemini временно недоступен: ${lastError?.message || "ошибка сети"}` }, 503);
 }
 
 async function legacyJsonResponse(streamResponse, corsHeaders) {

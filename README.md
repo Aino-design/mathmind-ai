@@ -6,10 +6,10 @@
 
 ## 🚀 Решенные проблемы
 
-1. **Мгновенный ответ на простые вопросы (`2+2`)**:
-   - Автоматическая маршрутизация коротких запросов на Gemini Flash.
+1. **Ответы на вопросы**:
+   - По умолчанию все запросы идут в Gemini; при временной перегрузке Worker повторяет запрос и переключается между Gemini Flash 3.8, 3.7 и 3.6.
 2. **Процесс размышления (Thinking Stream)**:
-   - Модель **DeepSeek-R1** транслирует поток мыслей (`<think>...</think>`). В интерфейсе PWA он отображается в режиме реального времени в блоке `🧠 ИИ думает:`.
+   - DeepSeek-R1 можно включить отдельно (`USE_DEEPSEEK=true`) при наличии баланса. Если DeepSeek откажет, Worker попробует Gemini.
 3. **Интеграция с ИИ Тетрадью**:
    - Содержимое обеих страниц тетради подмешивается в контекст запроса пользователя (`notebookContent`).
 4. **Защита от ошибки `Unexpected end of JSON input`**:
@@ -27,8 +27,9 @@
    npx wrangler secret put GEMINI_API_KEY
    npx wrangler secret put DEEPSEEK_API_KEY
    ```
-   * **`GEMINI_API_KEY`**: ключ из [Google AI Studio](https://aistudio.google.com/) для Gemini 3.8 Flash.
-   * **`DEEPSEEK_API_KEY`**: Ключ из [DeepSeek Platform](https://platform.deepseek.com/) для DeepSeek-R1.
+   * **`GEMINI_API_KEY`**: ключ из [Google AI Studio](https://aistudio.google.com/); он используется всегда, если DeepSeek не включён.
+   * **`DEEPSEEK_API_KEY`**: ключ из [DeepSeek Platform](https://platform.deepseek.com/), необязателен.
+   * **`USE_DEEPSEEK=true`**: необязательная переменная для включения DeepSeek. Если её не задавать, запросы идут только через Gemini.
 
 3. Если используете отдельный Worker, настройте его адрес в PWA или добавьте маршрут, который направляет /api/chat в этот Worker.
 
@@ -50,4 +51,4 @@
 4. Запустите новый deployment и дождитесь статуса Success.
 5. Проверьте https://ВАШ-САЙТ.pages.dev/api/chat в браузере: GET должен показать JSON о работе Worker. Затем проверьте чат в приложении.
 
-Функция использует Gemini 3.8 Flash. Google отключил Gemini 2.0 Flash 1 июня 2026 года. Значение API-ключа хранится только в Cloudflare Secret и не должно попадать в GitHub.
+Функция использует Gemini 3.8 Flash с повторными попытками и резервом на Gemini 3.7/3.6 Flash при временной перегрузке. DeepSeek выключен по умолчанию, чтобы запросы не зависели от его платного баланса. Значение API-ключа хранится только в Cloudflare Secret и не должно попадать в GitHub.
