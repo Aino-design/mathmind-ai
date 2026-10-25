@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ИИ Тетрадь PWA</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6f8; color: #333; }
+    header { background: #1e293b; color: white; padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+
+    /* Responsive Laptop / Notebook two-page layout */
+    .app-container { display: flex; flex-direction: row; gap: 1rem; padding: 1rem; max-width: 1400px; margin: 0 auto; height: calc(100vh - 70px); }
+
+    .notebook-side { flex: 1; background: white; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 1.25rem; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+    .notebook-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem; }
+    .notebook-title { font-size: 1.1rem; font-weight: 600; cursor: pointer; color: #0f172a; display: flex; align-items: center; gap: 0.5rem; }
+    .notebook-title:hover { color: #2563eb; }
+    .edit-icon { font-size: 0.85rem; opacity: 0.6; }
+
+    textarea.notebook-content { flex: 1; width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; font-size: 1rem; resize: none; outline: none; line-height: 1.5; }
+
+    /* Laptop Screen Adaptation */
+    @media (max-width: 1024px) {
+      .app-container { flex-direction: column; height: auto; }
+      .notebook-side { height: 400px; }
+    }
+
+    /* Floating Chat Window Modal */
+    .chat-modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: none; justify-content: center; align-items: center; z-index: 100; }
+    .chat-modal { background: white; width: 90%; max-width: 600px; height: 80vh; max-height: 700px; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2); }
+    .chat-modal-header { background: #0f172a; color: white; padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
+    .chat-modal-close { background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }
+
+    .chat-messages { flex: 1; padding: 1rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; background: #f8fafc; }
+    .message { padding: 0.75rem 1rem; border-radius: 8px; max-width: 85%; font-size: 0.95rem; line-height: 1.4; word-break: break-word; }
+    .message.user { background: #2563eb; color: white; align-self: flex-end; }
+    .message.ai { background: #e2e8f0; color: #0f172a; align-self: flex-start; }
+    .thinking-box { font-style: italic; background: #f1f5f9; border-left: 3px solid #3b82f6; color: #475569; padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.85rem; margin-bottom: 0.5rem; }
+
+    /* Input area appears immediately */
+    .chat-input-area { display: flex !important; padding: 0.75rem; border-top: 1px solid #e2e8f0; background: white; gap: 0.5rem; visibility: visible !important; opacity: 1 !important; }
+    .chat-input-area input { flex: 1; padding: 0.65rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; outline: none; }
+    .chat-input-area button { background: #2563eb; color: white; border: none; padding: 0.65rem 1.25rem; border-radius: 6px; cursor: pointer; font-weight: 500; }
+
+    .btn { background: #2563eb; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+    .btn-secondary { background: #475569; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>ИИ Тетрадь (PWA)</h1>
+    <button class="btn" id="openChatBtn">💬 Чат с ИИ</button>
+  </header>
+
+  <main class="app-container">
+    <!-- Left Notebook Side -->
+    <section class="notebook-side">
+      <div class="notebook-header">
+        <div class="notebook-title" id="leftNotebookTitle" onclick="renameNotebook('left')">
+          <span id="leftTitleText">Левая страница (Заметки)</span>
+          <span class="edit-icon">✏️</span>
+        </div>
+      </div>
+      <textarea class="notebook-content" id="leftNotebookText" placeholder="Введите ваши заметки здесь..."></textarea>
+    </section>
+
+    <!-- Right Notebook Side (Laptop fix: min-width: 0 & fully interactive) -->
+    <section class="notebook-side">
+      <div class="notebook-header">
+        <div class="notebook-title" id="rightNotebookTitle" onclick="renameNotebook('right')">
+          <span id="rightTitleText">Правая страница (Результаты)</span>
+          <span class="edit-icon">✏️</span>
+        </div>
+      </div>
+      <textarea class="notebook-content" id="rightNotebookText" placeholder="Результаты ИИ и дополнительные заметки..."></textarea>
+    </section>
+  </main>
+
+  <!-- Chat Modal -->
+  <div class="chat-modal-overlay" id="chatModal">
+    <div class="chat-modal">
+      <div class="chat-modal-header">
+        <span>Чат с ИИ (Gemini 2.0 / DeepSeek-R1)</span>
+        <button class="chat-modal-close" id="closeChatBtn">&times;</button>
+      </div>
+
+      <div class="chat-messages" id="chatMessages">
+        <div class="message ai">Привет! Чем я могу помочь? Ваша тетрадь подключена к моему контексту.</div>
+      </div>
+
+      <!-- Input area immediately visible upon open -->
+      <div class="chat-input-area">
+        <input type="text" id="chatInput" placeholder="Задайте вопрос (например: 2+2)..." autocomplete="off" />
+        <button id="sendMessageBtn">Отправить</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { askAI } from './pwa_ai_client.js';
+
+    // Prevent PWA banner default error in console
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      window.deferredPWAInstallPrompt = e;
+    });
+
+    // Chat Modal Toggle & Auto-focus
+    const chatModal = document.getElementById('chatModal');
+    const openChatBtn = document.getElementById('openChatBtn');
+    const closeChatBtn = document.getElementById('closeChatBtn');
+    const chatInput = document.getElementById('chatInput');
+    const sendMessageBtn = document.getElementById('sendMessageBtn');
+    const chatMessages = document.getElementById('chatMessages');
+
+    openChatBtn.addEventListener('click', () => {
+      chatModal.style.display = 'flex';
+      setTimeout(() => chatInput.focus(), 50);
+    });
+
+    closeChatBtn.addEventListener('click', () => {
+      chatModal.style.display = 'none';
+    });
+
+    // Rename Notebook Function
+    window.renameNotebook = function(side) {
+      const titleElem = side === 'left' ? document.getElementById('leftTitleText') : document.getElementById('rightTitleText');
+      const currentTitle = titleElem.innerText;
+      const newTitle = prompt('Введите новое название тетради:', currentTitle);
+      if (newTitle && newTitle.trim()) {
+        titleElem.innerText = newTitle.trim();
+        localStorage.setItem(`notebook_title_${side}`, newTitle.trim());
+      }
+    };
+
+    // Load saved notebook data
+    if (localStorage.getItem('notebook_title_left')) document.getElementById('leftTitleText').innerText = localStorage.getItem('notebook_title_left');
+    if (localStorage.getItem('notebook_title_right')) document.getElementById('rightTitleText').innerText = localStorage.getItem('notebook_title_right');
+    if (localStorage.getItem('notebook_left_text')) document.getElementById('leftNotebookText').value = localStorage.getItem('notebook_left_text');
+    if (localStorage.getItem('notebook_right_text')) document.getElementById('rightNotebookText').value = localStorage.getItem('notebook_right_text');
+
+    document.getElementById('leftNotebookText').addEventListener('input', (e) => localStorage.setItem('notebook_left_text', e.target.value));
+    document.getElementById('rightNotebookText').addEventListener('input', (e) => localStorage.setItem('notebook_right_text', e.target.value));
+
+    // Send Chat Message
+    async function handleSend() {
+      const query = chatInput.value.trim();
+      if (!query) return;
+
+      // Render User Message
+      const userMsgDiv = document.createElement('div');
+      userMsgDiv.className = 'message user';
+      userMsgDiv.innerText = query;
+      chatMessages.appendChild(userMsgDiv);
+
+      chatInput.value = '';
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+
+      // Render AI Thinking & Message Box
+      const aiThinkingDiv = document.createElement('div');
+      aiThinkingDiv.className = 'thinking-box';
+      aiThinkingDiv.style.display = 'none';
+      chatMessages.appendChild(aiThinkingDiv);
+
+      const aiMsgDiv = document.createElement('div');
+      aiMsgDiv.className = 'message ai';
+      aiMsgDiv.innerText = 'Печатает...';
+      chatMessages.appendChild(aiMsgDiv);
+
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+
+      const notebookContent = `[${document.getElementById('leftTitleText').innerText}]:\n${document.getElementById('leftNotebookText').value}\n\n[${document.getElementById('rightTitleText').innerText}]:\n${document.getElementById('rightNotebookText').value}`;
+
+      try {
+        await askAI({
+          workerUrl: '/api/chat', // Cloudflare Worker endpoint
+          query,
+          notebookContent,
+          onThinking: (thoughts) => {
+            aiThinkingDiv.style.display = 'block';
+            aiThinkingDiv.innerText = `🧠 ИИ думает:\n${thoughts}`;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          },
+          onResponse: (text) => {
+            aiMsgDiv.innerText = text;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+        });
+      } catch (err) {
+        aiMsgDiv.innerText = `Ошибка: ${err.message}`;
+      }
+    }
+
+    sendMessageBtn.addEventListener('click', handleSend);
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleSend();
+    });
+  </script>
+</body>
+</html>

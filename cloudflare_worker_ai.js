@@ -1,6 +1,6 @@
 /**
  * Cloudflare Worker Handler for AI Models (Gemini 2.0 Flash + DeepSeek R1)
- * Supports CORS, Server-Sent Events (SSE) streaming, error handling (valid JSON output), and Notebook context.
+ * Supports /api/chat route, CORS, SSE streaming, error handling (valid JSON output), and Notebook context.
  */
 
 export default {
@@ -15,9 +15,16 @@ export default {
       return new Response(null, { headers: corsHeaders, status: 204 });
     }
 
+    const url = new URL(request.url);
+
     try {
       if (request.method !== "POST") {
         return jsonResponse({ error: "Method not allowed. Use POST." }, 405, corsHeaders);
+      }
+
+      // Handle both / and /api/chat
+      if (url.pathname !== "/" && url.pathname !== "/api/chat") {
+        return jsonResponse({ error: `Route ${url.pathname} not found.` }, 404, corsHeaders);
       }
 
       let body;
