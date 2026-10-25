@@ -38,6 +38,9 @@ export default {
       const query = body.query ?? body.message ?? body.prompt;
       const notebookContent = body.notebookContent ?? body.notebook ?? "";
       const forceReasoning = body.forceReasoning ?? body.deepThinking ?? false;
+      // Older cached PWA builds send `message` and expect one JSON response.
+      // New builds send `query` and consume the SSE stream directly.
+      const legacyJsonClient = typeof body.query !== "string" && typeof body.message === "string";
 
       if (!query || typeof query !== "string") {
         return jsonResponse({ error: "Field 'query' is required." }, 400, corsHeaders);
@@ -87,6 +90,8 @@ export default {
           return jsonResponse({ error: errData.error?.message || `Gemini API error ${upstreamRes.status}` }, upstreamRes.status, corsHeaders);
         }
 
+        if (legacyJsonClient) return await legacyJsonResponse(upstreamRes, corsHeaders);
+
         return new Response(upstreamRes.body, {
           status: 200,
           headers: {
@@ -130,6 +135,7 @@ export default {
             });
 
             if (fallbackRes.ok) {
+              if (legacyJsonClient) return await legacyJsonResponse(fallbackRes, corsHeaders);
               return new Response(fallbackRes.body, {
                 status: 200,
                 headers: {
@@ -151,6 +157,8 @@ export default {
             error: `DeepSeek отказал: ${deepseekError}. Пополни баланс DeepSeek или добавь GEMINI_API_KEY в Cloudflare для автоматического резерва.`,
           }, upstreamRes.status, corsHeaders);
         }
+
+        if (legacyJsonClient) return await legacyJsonResponse(upstreamRes, corsHeaders);
 
         return new Response(upstreamRes.body, {
           status: 200,
@@ -176,4 +184,30 @@ function jsonResponse(obj, status = 200, headers = {}) {
       "Content-Type": "application/json; charset=utf-8",
     },
   });
+}
+
+async function legacyJsonResponse(streamResponse, corsHeaders) {
+  const raw = await streamResponse.text();
+  let answer = "";
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+    const payload = trimmed.slice(5).trim();
+    if (!payload || payload === "[DONE]") continue;
+
+    try {
+      const item = JSON.parse(payload);
+      const geminiParts = item.candidates?.[0]?.content?.parts || [];
+      answer += geminiParts.filter((part) => !part.thought).map((part) => part.text || "").join("");
+      answer += item.choices?.[0]?.delta?.content || "";
+    } catch {
+      // Ignore SSE metadata or non-JSON event lines.
+    }
+  }
+
+  if (!answer) {
+    return jsonResponse({ error: "ИИ вернул пустой поток. Обнови страницу и повтори запрос." }, 502, corsHeaders);
+  }
+  return jsonResponse({ answer }, 200, corsHeaders);
 }
