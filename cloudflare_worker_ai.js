@@ -33,7 +33,11 @@ export default {
         return jsonResponse({ error: "Invalid JSON input body in request." }, 400, corsHeaders);
       }
 
-      const { query, notebookContent, forceReasoning } = body;
+      // Accept both the current client contract (query/forceReasoning) and
+      // older app builds that send message/deepThinking.
+      const query = body.query ?? body.message ?? body.prompt;
+      const notebookContent = body.notebookContent ?? body.notebook ?? "";
+      const forceReasoning = body.forceReasoning ?? body.deepThinking ?? false;
 
       if (!query || typeof query !== "string") {
         return jsonResponse({ error: "Field 'query' is required." }, 400, corsHeaders);
