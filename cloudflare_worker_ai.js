@@ -61,7 +61,7 @@ export default {
       // USE_DEEPSEEK=true setting, use the configured Gemini key for every query.
       const useGemini = isSimpleQuery || !deepseekApiKey || env.USE_DEEPSEEK !== "true";
 
-      if (useGemini && !googleApiKey && !env.GROQ_API_KEY) {
+      if (useGemini && !googleApiKey && !env.GROQ_API_KEY && !env.MISTRAL_API_KEY) {
         return jsonResponse(
           { error: "GEMINI_API_KEY is missing from the Cloudflare Pages project secrets." },
           500,
@@ -99,9 +99,28 @@ export default {
         });
       }
 
+      const mistralResult = env.MISTRAL_API_KEY
+        ? await requestMistral(env.MISTRAL_API_KEY, fullPrompt, forceReasoning, env.MISTRAL_MODEL)
+        : null;
+      if (mistralResult?.response) {
+        if (legacyJsonClient) return await legacyJsonResponse(mistralResult.response, corsHeaders);
+        return new Response(mistralResult.response.body, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          },
+        });
+      }
+
       if (useGemini && !googleApiKey) {
         return jsonResponse({
-          error: `Groq не ответил (${groqResult?.error || "ошибка"}), и в Cloudflare не задан GEMINI_API_KEY для резерва.`,
+          error: `Резервные ИИ недоступны (${[
+            groqResult?.error && `Groq: ${groqResult.error}`,
+            mistralResult?.error && `Mistral: ${mistralResult.error}`,
+          ].filter(Boolean).join("; ") || "ошибка"}), и в Cloudflare не задан GEMINI_API_KEY.`,
         }, 502, corsHeaders);
       }
 
@@ -113,7 +132,11 @@ export default {
           const errData = await upstreamRes.json().catch(() => ({}));
           const geminiError = errData.error?.message || `Gemini API error ${upstreamRes.status}`;
           return jsonResponse({
-            error: `${groqResult?.error ? `Groq не ответил (${groqResult.error}); ` : ""}${geminiError}`,
+            error: `${[
+              groqResult?.error && `Groq: ${groqResult.error}`,
+              mistralResult?.error && `Mistral: ${mistralResult.error}`,
+              `Gemini: ${geminiError}`,
+            ].filter(Boolean).join("; ")}`,
           }, upstreamRes.status, corsHeaders);
         }
 
@@ -269,6 +292,43 @@ async function requestGroq(apiKey, prompt, forceReasoning, configuredModel) {
         stream: true,
         max_completion_tokens: 2048,
         ...(forceReasoning ? { reasoning_effort: "medium", reasoning_format: "hidden" } : {}),
+      }),
+    });
+
+    if (response.ok) return { response };
+    const details = await response.text().catch(() => "");
+    return { error: details.slice(0, 300) || `HTTP ${response.status}` };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+async function requestMistral(apiKey, prompt, forceReasoning, configuredModel) {
+  try {
+    const response = await fetchBeforeHeaders("https://api.mistral.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: configuredModel || "mistral-small-latest",
+        messages: [
+          {
+            role: "system",
+            content: [
+              "Ты MathMind, дружелюбный репетитор по математике. Отвечай на русском, если пользователь пишет по-русски.",
+              "На простой вопрос отвечай кратко и сразу; сложную тему объясняй понятно, по шагам и с примерами.",
+              "Форматируй ответ Markdown: используй абзацы, списки и формулы, когда это помогает.",
+              "Если дан контекст тетради, опирайся на него и не выдумывай нечитаемые записи.",
+              forceReasoning ? "Тщательно проверь вычисления и объясни решение понятными шагами." : "",
+            ].filter(Boolean).join(" "),
+          },
+          { role: "user", content: prompt },
+        ],
+        stream: true,
+        max_tokens: 2048,
+        ...(forceReasoning ? { reasoning_effort: "medium" } : {}),
       }),
     });
 
