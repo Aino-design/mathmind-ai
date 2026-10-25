@@ -46,6 +46,13 @@ export default {
         return jsonResponse({ error: "Field 'query' is required." }, 400, corsHeaders);
       }
 
+      if (!notebookContent.trim() && !forceReasoning) {
+        const arithmeticAnswer = solveSimpleArithmetic(query);
+        if (arithmeticAnswer !== null) {
+          return jsonResponse({ answer: arithmeticAnswer, reply: arithmeticAnswer }, 200, corsHeaders);
+        }
+      }
+
       const googleApiKey = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
       const deepseekApiKey = env.DEEPSEEK_API_KEY;
 
@@ -181,7 +188,7 @@ async function requestGemini(apiKey, prompt, thinkingLevel) {
     const attempts = modelIndex === 0 ? 3 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        lastResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
+        lastResponse = await fetchBeforeHeaders(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
           body: JSON.stringify({
@@ -208,6 +215,73 @@ async function requestGemini(apiKey, prompt, thinkingLevel) {
 
   if (lastResponse) return lastResponse;
   return jsonResponse({ error: `Gemini временно недоступен: ${lastError?.message || "ошибка сети"}` }, 503);
+}
+
+async function fetchBeforeHeaders(url, options, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    // Clear the timer as soon as headers arrive, so it cannot cut off the SSE body.
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function solveSimpleArithmetic(input) {
+  const expression = input.toLowerCase().trim()
+    .replace(/^(?:сколько будет|чему равно|посчитай|вычисли|ответ)\s*/i, "")
+    .replace(/[?!=]+$/g, "")
+    .replace(/[−]/g, "-")
+    .replace(/[×]/g, "*")
+    .replace(/[÷]/g, "/")
+    .replace(/,/g, ".")
+    .trim();
+
+  if (!expression || !/[+*/-]/.test(expression) || !/^[\d\s().+*/-]+$/.test(expression)) return null;
+  const tokens = expression.match(/\d+(?:\.\d+)?|[()+\-*/]/g) || [];
+  if (tokens.join("") !== expression.replace(/\s+/g, "")) return null;
+
+  let position = 0;
+  function factor() {
+    const token = tokens[position++];
+    if (token === "+") return factor();
+    if (token === "-") return -factor();
+    if (token === "(") {
+      const value = sum();
+      if (tokens[position++] !== ")") throw new Error("bracket");
+      return value;
+    }
+    if (!token || !/^\d+(?:\.\d+)?$/.test(token)) throw new Error("number");
+    return Number(token);
+  }
+  function product() {
+    let value = factor();
+    while (tokens[position] === "*" || tokens[position] === "/") {
+      const operator = tokens[position++];
+      const right = factor();
+      if (operator === "/" && right === 0) throw new Error("zero");
+      value = operator === "*" ? value * right : value / right;
+    }
+    return value;
+  }
+  function sum() {
+    let value = product();
+    while (tokens[position] === "+" || tokens[position] === "-") {
+      const operator = tokens[position++];
+      const right = product();
+      value = operator === "+" ? value + right : value - right;
+    }
+    return value;
+  }
+
+  try {
+    const value = sum();
+    if (position !== tokens.length || !Number.isFinite(value)) return null;
+    return `Ответ: ${Number(value.toPrecision(12))}`;
+  } catch {
+    return null;
+  }
 }
 
 async function legacyJsonResponse(streamResponse, corsHeaders) {
