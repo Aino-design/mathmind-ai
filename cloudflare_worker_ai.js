@@ -114,7 +114,42 @@ export default {
 
         if (!upstreamRes.ok) {
           const errData = await upstreamRes.json().catch(() => ({}));
-          return jsonResponse({ error: errData.error?.message || `DeepSeek API error ${upstreamRes.status}` }, upstreamRes.status, corsHeaders);
+          const deepseekError = errData.error?.message || `DeepSeek API error ${upstreamRes.status}`;
+
+          // DeepSeek can reject requests when its prepaid balance is empty.
+          // Fall back to the already-configured Gemini key so the chat remains usable.
+          if (googleApiKey) {
+            const fallbackUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse";
+            const fallbackRes = await fetch(fallbackUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-goog-api-key": googleApiKey },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: fullPrompt }] }],
+                generationConfig: { thinkingConfig: { thinkingLevel: "medium" } },
+              }),
+            });
+
+            if (fallbackRes.ok) {
+              return new Response(fallbackRes.body, {
+                status: 200,
+                headers: {
+                  ...corsHeaders,
+                  "Content-Type": "text/event-stream; charset=utf-8",
+                  "Cache-Control": "no-cache",
+                  "Connection": "keep-alive",
+                },
+              });
+            }
+
+            const fallbackError = await fallbackRes.json().catch(() => ({}));
+            return jsonResponse({
+              error: `DeepSeek недоступен (${deepseekError}); резервный Gemini тоже не ответил: ${fallbackError.error?.message || `HTTP ${fallbackRes.status}`}`,
+            }, fallbackRes.status, corsHeaders);
+          }
+
+          return jsonResponse({
+            error: `DeepSeek отказал: ${deepseekError}. Пополни баланс DeepSeek или добавь GEMINI_API_KEY в Cloudflare для автоматического резерва.`,
+          }, upstreamRes.status, corsHeaders);
         }
 
         return new Response(upstreamRes.body, {
