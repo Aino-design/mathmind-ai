@@ -3,7 +3,7 @@
  * Handles SSE streaming, prevents Unexpected end of JSON input, and parses reasoning process in real time.
  */
 
-export async function askAI({ workerUrl, query, notebookContent = "", forceReasoning = false, onThinking, onResponse }) {
+export async function askAI({ workerUrl = "/api/chat", query, notebookContent = "", forceReasoning = false, onThinking, onResponse }) {
   try {
     const res = await fetch(workerUrl, {
       method: "POST",
@@ -27,7 +27,11 @@ export async function askAI({ workerUrl, query, notebookContent = "", forceReaso
 
     if (!res.ok) {
       const rawText = await res.text();
-      throw new Error(`HTTP ${res.status}: ${rawText.slice(0, 100)}`);
+      throw new Error(`HTTP ${res.status}: ${rawText.slice(0, 100) || "Empty server response"}`);
+    }
+
+    if (!res.body) {
+      throw new Error("Server response body is empty.");
     }
 
     // Read SSE ReadableStream line by line

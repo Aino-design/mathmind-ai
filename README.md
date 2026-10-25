@@ -1,41 +1,41 @@
-# AI Integration & Optimization Guide (Cloudflare Worker & PWA)
+# ИИ Тетрадь — Руководство по развертыванию (Cloudflare Worker + PWA)
 
-## Solution Overview / Решение проблем
-
-В данном решении устранены все проблемы:
-
-1. **Долгая задержка ответа на простые вопросы (2+2)**:
-   - Внедрена маршрутизация на **Gemini 2.0 Flash** (<200 мс TTFT).
-
-2. **Отсутствие процесса размышления (Thinking / Reasoning Stream)**:
-   - Внедрен **DeepSeek-R1** с передачей блоков `<think>...</think>`. В PWA клиенте `pwa_ai_client.js` этот блок парсится и передается в callback `onThinking` для отрисовки "ИИ думает...".
-
-3. **Интеграция с ИИ Тетрадью (Notebook Context Integration)**:
-   - Поле `notebookContent` передается из PWA в Cloudflare Worker и подмешивается в контекст запроса.
-
-4. **Ошибка `Failed to execute 'json' on 'Response': Unexpected end of JSON input`**:
-   - В `cloudflare_worker_ai.js` функция `jsonResponse` гарантирует заголовок `Content-Type: application/json` и завалидированный JSON ответ.
-   - В `pwa_ai_client.js` перед вызовом `.json()` проверяется `content-type`, что предотвращает краш PWA.
+Данный репозиторий содержит решение для мгновенных ответов ИИ, отображения процесса размышления (`ИИ думает...`) и подмешивания контекста "ИИ Тетради".
 
 ---
 
-## Инструкция по настройке Cloudflare Worker
+## 🚀 Решенные проблемы
 
-1. Скопируйте файл `cloudflare_worker_ai.js` в ваш Cloudflare Worker.
-2. Задайте секретные API ключи в Cloudflare через CLI `wrangler` или панель Cloudflare Dashboard:
+1. **Мгновенный ответ на простые вопросы (`2+2`)**:
+   - Автоматическая маршрутизация коротких запросов на **Gemini 2.0 Flash** со временем задержки **~200 мс**.
+2. **Процесс размышления (Thinking Stream)**:
+   - Модель **DeepSeek-R1** транслирует поток мыслей (`<think>...</think>`). В интерфейсе PWA он отображается в режиме реального времени в блоке `🧠 ИИ думает:`.
+3. **Интеграция с ИИ Тетрадью**:
+   - Содержимое обеих страниц тетради подмешивается в контекст запроса пользователя (`notebookContent`).
+4. **Защита от ошибки `Unexpected end of JSON input`**:
+   - В `cloudflare_worker_ai.js` и `pwa_ai_client.js` добавлена строгая проверка заголовков `Content-Type: application/json` и безопасно обработаны SSE-стримы.
+5. **Адаптивность для ноутбуков & UX чата**:
+   - Адаптирована верстка правого блока тетради (`min-width: 0`), добавлено редактирование названий тетрадей и фокус на поле ввода при открытии чата.
+
+---
+
+## 🛠️ Развертывание Cloudflare Worker
+
+1. Создайте Cloudflare Worker и вставьте код из **`cloudflare_worker_ai.js`**.
+2. В консоли Cloudflare задайте секреты с ключами API:
    ```bash
-   wrangler secret put GOOGLE_API_KEY
-   wrangler secret put DEEPSEEK_API_KEY
+   npx wrangler secret put GOOGLE_API_KEY
+   npx wrangler secret put DEEPSEEK_API_KEY
    ```
-3. Подключите клиент `pwa_ai_client.js` в вашем PWA веб-приложении:
-   ```javascript
-   import { askAI } from './pwa_ai_client.js';
+   * **`GOOGLE_API_KEY`**: Ключ из [Google AI Studio](https://aistudio.google.com/) для Gemini 2.0 Flash.
+   * **`DEEPSEEK_API_KEY`**: Ключ из [DeepSeek Platform](https://platform.deepseek.com/) для DeepSeek-R1.
 
-   await askAI({
-     workerUrl: 'https://your-worker.workers.dev',
-     query: '2+2',
-     notebookContent: 'Моя заметка в тетради...',
-     onThinking: (thoughts) => { console.log('ИИ думает:', thoughts); },
-     onResponse: (answer) => { console.log('Ответ:', answer); }
-   });
-   ```
+3. Убедитесь, что ваш Cloudflare Worker обрабатывает POST-запросы на маршут `/api/chat`.
+
+---
+
+## 📱 Развертывание PWA Фронтенда
+
+Разместите файлы **`index.html`** и **`pwa_ai_client.js`** на вашем веб-сервере.
+
+При открытии приложения кликните на названия тетрадей ("Левая страница", "Правая страница") для переименования.

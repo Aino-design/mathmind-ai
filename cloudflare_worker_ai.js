@@ -1,6 +1,6 @@
 /**
  * Cloudflare Worker Handler for AI Models (Gemini 2.0 Flash + DeepSeek R1)
- * Supports /api/chat route, CORS, SSE streaming, error handling (valid JSON output), and Notebook context.
+ * Supports CORS, Server-Sent Events (SSE) streaming, error handling (valid JSON output), and Notebook context.
  */
 
 export default {
@@ -18,13 +18,12 @@ export default {
     const url = new URL(request.url);
 
     try {
-      if (request.method !== "POST") {
-        return jsonResponse({ error: "Method not allowed. Use POST." }, 405, corsHeaders);
+      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/api/chat")) {
+        return jsonResponse({ status: "ok", message: "AI Cloudflare Worker is active." }, 200, corsHeaders);
       }
 
-      // Handle both / and /api/chat
-      if (url.pathname !== "/" && url.pathname !== "/api/chat") {
-        return jsonResponse({ error: `Route ${url.pathname} not found.` }, 404, corsHeaders);
+      if (request.method !== "POST") {
+        return jsonResponse({ error: "Method not allowed. Use POST." }, 405, corsHeaders);
       }
 
       let body;
@@ -48,7 +47,7 @@ export default {
 
       if (useGemini && !googleApiKey) {
         return jsonResponse(
-          { error: "GOOGLE_API_KEY is missing on Cloudflare Worker. Please run `npx wrangler secret put GOOGLE_API_KEY`." },
+          { error: "GOOGLE_API_KEY missing on Cloudflare Worker. Set it with `npx wrangler secret put GOOGLE_API_KEY`." },
           500,
           corsHeaders
         );
@@ -56,7 +55,7 @@ export default {
 
       if (!useGemini && !deepseekApiKey) {
         return jsonResponse(
-          { error: "DEEPSEEK_API_KEY is missing on Cloudflare Worker. Please run `npx wrangler secret put DEEPSEEK_API_KEY`." },
+          { error: "DEEPSEEK_API_KEY missing on Cloudflare Worker. Set it with `npx wrangler secret put DEEPSEEK_API_KEY`." },
           500,
           corsHeaders
         );
